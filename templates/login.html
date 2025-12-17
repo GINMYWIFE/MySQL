@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <!-- ... existing code ... -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 - 小型书籍管理系统</title>
+  <!-- 引入 Bootstrap 样式，增强默认样式的鲁棒性 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    /* 基础兜底样式，避免外部样式失效时出现白屏的极简布局 */
+    body {
+      background-color: #f8f9fa;
+    }
+  </style>
+</head>
+<body class="bg-light d-flex justify-content-center align-items-center" style="height:100vh;">
+  <!-- ... existing code ... -->
+  <div class="card shadow p-4" style="width: 380px;">
+    <h3 class="text-center mb-3">书籍管理系统登录</h3>
+    <!-- 错误提示区域：当后端返回错误或URL中包含 ?error=xxx 时可视化显示 -->
+    <div id="errorBox" class="alert alert-danger d-none" role="alert"></div>
+    <!-- 成功提示区域：当URL中包含 ?success=xxx 时可视化显示 -->
+    <div id="successBox" class="alert alert-success d-none" role="alert"></div>
+
+    <form action="/login" method="POST" novalidate>
+      <div class="mb-3">
+        <label class="form-label">用户名</label>
+        <input type="text" name="username" class="form-control" required autocomplete="username" placeholder="请输入用户名">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">密码</label>
+        <div class="input-group">
+          <input type="password" name="password" id="passwordInput" class="form-control" required autocomplete="current-password" placeholder="请输入密码">
+          <button class="btn btn-outline-secondary" type="button" id="togglePwd">显示</button>
+        </div>
+      </div>
+      <button class="btn btn-primary w-100" type="submit">登录</button>
+    </form>
+    <div class="mt-3 text-center">
+      <a href="/register">没有账号？去注册</a>
+    </div>
+  </div>
+  <!-- ... existing code ... -->
+  <!-- 引入 Bootstrap 脚本（用于输入组按钮等交互） -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // 显示/隐藏密码
+    document.getElementById('togglePwd').addEventListener('click', function () {
+      const input = document.getElementById('passwordInput');
+      const isPwd = input.type === 'password';
+      input.type = isPwd ? 'text' : 'password';
+      this.textContent = isPwd ? '隐藏' : '显示';
+    });
+
+    // 如果URL参数中有 error，则显示到错误提示框
+    (function showErrorFromQuery() {
+      const params = new URLSearchParams(window.location.search);
+      const err = params.get('error');
+      if (err) {
+        const box = document.getElementById('errorBox');
+        box.textContent = decodeURIComponent(err);
+        box.classList.remove('d-none');
+      }
+    })();
+    (function showSuccessFromQuery() {
+      const params = new URLSearchParams(window.location.search);
+      const ok = params.get('success');
+      if (ok) {
+        const box = document.getElementById('successBox');
+        box.textContent = decodeURIComponent(ok);
+        box.classList.remove('d-none');
+      }
+    })();
+  </script>
+</body>
+</html>
