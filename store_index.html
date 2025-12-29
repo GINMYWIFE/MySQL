@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网上书店</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        [v-cloak] { display: none; }
+        .book-card {
+            transition: transform 0.2s;
+            height: 100%;
+        }
+        .book-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .cover-img {
+            height: 250px;
+            object-fit: cover;
+            width: 100%;
+        }
+        .cart-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            padding: 3px 6px;
+            border-radius: 50%;
+            background: red;
+            color: white;
+            font-size: 10px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div id="app" v-cloak>
+        <!-- Navbar -->
+        <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+            <div class="container">
+                <a class="navbar-brand" href="#" @click.prevent="currentView='home'">
+                    <i class="fas fa-book-open me-2"></i>网上书店
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{active: currentView==='home'}" href="#" @click.prevent="currentView='home'">首页</a>
+                        </li>
+                        <li class="nav-item" v-if="user.role === 'customer'">
+                            <a class="nav-link" :class="{active: currentView==='orders'}" href="#" @click.prevent="fetchOrders(); currentView='orders'">我的订单</a>
+                        </li>
+                        <li class="nav-item" v-if="['staff', 'manager'].includes(user.role)">
+                            <a class="nav-link" :class="{active: currentView==='manage'}" href="#" @click.prevent="currentView='manage'">管理后台</a>
+                        </li>
+                    </ul>
+                    
+                    <div class="d-flex align-items-center">
+                        <!-- Search -->
+                        <form class="d-flex me-3" @submit.prevent="searchBooks">
+                            <input class="form-control me-2" type="search" placeholder="搜索书籍..." v-model="searchKeyword">
+                            <button class="btn btn-outline-light" type="submit">搜索</button>
+                        </form>
+
+                        <!-- Cart -->
+                        <div v-if="!['staff', 'manager'].includes(user.role)" class="position-relative me-3 cursor-pointer" @click="showCart = true" style="cursor: pointer; color: white;">
+                            <i class="fas fa-shopping-cart fa-lg"></i>
+                            <span class="cart-badge" v-if="cartTotalCount > 0">{{ cartTotalCount }}</span>
+                        </div>
+
+                        <!-- Login/Register Buttons -->
+                        <div v-if="user.role === 'guest'">
+                            <button class="btn btn-outline-light me-2" @click="showLoginModal = true">登录</button>
+                            <button class="btn btn-light" @click="showRegisterModal = true">注册</button>
+                        </div>
+
+                        <!-- User Menu -->
+                        <div class="dropdown" v-if="user.role !== 'guest'">
+                            <button class="btn btn-light dropdown-toggle" @click="showUserMenu = !showUserMenu">
+                                <i class="fas fa-user me-1"></i> {{ user.nickname || user.username }}
+                                <span class="badge bg-success ms-1" v-if="user.role === 'customer'">¥{{ user.balance.toFixed(2) }}</span>
+                                <i class="fas fa-chevron-down ms-1"></i>
+                            </button>
+                            <ul class="dropdown-menu dropdown-menu-end" :class="{show: showUserMenu}">
+                                <li><a class="dropdown-item" href="#" @click.prevent="showLoginModal = true; showUserMenu = false">切换账号</a></li>
+                                <li><a class="dropdown-item" href="#" @click.prevent="logout(); showUserMenu = false">退出登录</a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <div class="container py-4">
+            
+            <!-- Alert Messages -->
+            <div v-if="message" class="alert alert-success alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" @click="message = ''"></button>
+            </div>
+            <div v-if="error" class="alert alert-danger alert-dismissible fade show" role="alert">
+                {{ error }}
+                <button type="button" class="btn-close" @click="error = ''"></button>
+            </div>
+
+            <!-- Home View: Book List -->
+            <div v-if="currentView === 'home'">
+                <div class="row g-4">
+                    <div class="col-md-3 col-sm-6" v-for="book in books" :key="book.id">
+                        <div class="card book-card">
+                            <img :src="book.cover ? (book.cover.startsWith('http') ? book.cover : '/static/covers/' + book.cover) : 'https://via.placeholder.com/200x300?text=No+Cover'" class="card-img-top cover-img" alt="cover">
+                            <div class="card-body d-flex flex-column">
+                                <h5 class="card-title text-truncate" :title="book.title">{{ book.title }}</h5>
+                                <p class="card-text small text-muted mb-1">{{ book.author }}</p>
+                                <div class="mt-auto d-flex justify-content-between align-items-center">
+                                    <span class="h5 text-danger mb-0">¥{{ book.price }}</span>
+                                    <button class="btn btn-sm btn-primary" 
+                                            @click="addToCart(book)" 
+                                            :disabled="book.stock <= 0 || ['staff', 'manager'].includes(user.role)">
+                                        {{ book.stock > 0 && !['staff', 'manager'].includes(user.role) ? '加入购物车' : book.stock <= 0 ? '缺货' : '无购买权限' }}
+                                    </button>
+                                </div>
+                                <div class="small text-muted mt-2">库存: {{ book.stock }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pagination -->
+                <nav class="mt-4" v-if="totalPages > 1">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item" :class="{disabled: currentPage === 1}">
+                            <a class="page-link" href="#" @click.prevent="fetchBooks(currentPage - 1)">上一页</a>
+                        </li>
+                        <li class="page-item disabled"><span class="page-link">{{ currentPage }} / {{ totalPages }}</span></li>
+                        <li class="page-item" :class="{disabled: currentPage === totalPages}">
+                            <a class="page-link" href="#" @click.prevent="fetchBooks(currentPage + 1)">下一页</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+
+            <!-- Orders View -->
+            <div v-if="currentView === 'orders'">
+                <h3 class="mb-4">我的订单</h3>
+                <div class="card mb-3" v-for="order in orders" :key="order.id">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>订单号: #{{ order.id }} <small class="text-muted ms-2">{{ order.created_at }}</small></span>
+                        <span class="badge" :class="statusBadgeClass(order.status)">{{ getStatusText(order.status) }}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>商品</th>
+                                        <th>单价</th>
+                                        <th>数量</th>
+                                        <th>小计</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="item in order.items" :key="item.id">
+                                        <td>{{ item.title }}</td>
+                                        <td>¥{{ item.price_snapshot }}</td>
+                                        <td>{{ item.quantity }}</td>
+                                        <td>¥{{ (item.price_snapshot * item.quantity).toFixed(2) }}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="text-end fw-bold">
+                            总计: ¥{{ order.total_price }}
+                        </div>
+                        <div v-if="user.role === 'customer' && order.status !== 'completed' && order.status !== 'cancelled' && order.status !== 'shipped'" class="mt-2">
+                            <button class="btn btn-sm btn-danger" @click="cancelOrder(order.id)">取消订单</button>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="orders.length === 0" class="text-center py-5 text-muted">
+                    暂无订单
+                </div>
+            </div>
+
+            <!-- Management View -->
+            <div v-if="currentView === 'manage' && ['staff', 'manager'].includes(user.role)">
+                <ul class="nav nav-tabs mb-4">
+                    <li class="nav-item">
+                        <button class="nav-link" :class="{active: manageTab === 'books'}" @click="manageTab = 'books'">书籍管理</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" :class="{active: manageTab === 'orders'}" @click="manageTab = 'orders'; fetchAllOrders()">订单审核</button>
+                    </li>
+                    <li class="nav-item" v-if="user.role === 'manager'">
+                        <button class="nav-link" :class="{active: manageTab === 'stats'}" @click="manageTab = 'stats'; fetchStats()">销售统计</button>
+                    </li>
+                </ul>
+
+                <!-- Book Management -->
+                <div v-if="manageTab === 'books'">
+                    <div class="d-flex justify-content-between mb-3">
+                        <h4>书籍列表</h4>
+                        <button class="btn btn-success" @click="openBookModal()">添加新书</button>
+                    </div>
+                    <!-- Reuse Home View Book List or simpler table? Let's use table for management -->
+                     <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>标题</th>
+                                    <th>作者</th>
+                                    <th>价格</th>
+                                    <th>库存</th>
+                                    <th>状态</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="book in books" :key="book.id">
+                                    <td>{{ book.id }}</td>
+                                    <td>{{ book.title }}</td>
+                                    <td>{{ book.author }}</td>
+                                    <td>{{ book.price }}</td>
+                                    <td>{{ book.stock }}</td>
+                                    <td>
+                                        <span class="badge" :class="book.status === 'on_shelf' ? 'bg-success' : 'bg-secondary'">
+                                            {{ book.status === 'on_shelf' ? '上架' : '下架' }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary me-1" @click="openBookModal(book)">编辑</button>
+                                        <button class="btn btn-sm btn-warning" @click="toggleShelf(book)">
+                                            {{ book.status === 'on_shelf' ? '下架' : '上架' }}
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <!-- Pagination for Manage view same as home -->
+                     <nav class="mt-4" v-if="totalPages > 1">
+                        <ul class="pagination justify-content-center">
+                            <li class="page-item" :class="{disabled: currentPage === 1}">
+                                <a class="page-link" href="#" @click.prevent="fetchBooks(currentPage - 1)">上一页</a>
+                            </li>
+                            <li class="page-item disabled"><span class="page-link">{{ currentPage }} / {{ totalPages }}</span></li>
+                            <li class="page-item" :class="{disabled: currentPage === totalPages}">
+                                <a class="page-link" href="#" @click.prevent="fetchBooks(currentPage + 1)">下一页</a>
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+
+                <!-- Order Management -->
+                <div v-if="manageTab === 'orders'">
+                    <h4>订单审核</h4>
+                    <div class="mb-3">
+                        <button class="btn btn-sm btn-outline-secondary me-2" @click="manageFilterStatus=''; fetchAllOrders()">全部</button>
+                        <button class="btn btn-sm btn-outline-warning me-2" @click="manageFilterStatus='pending'; fetchAllOrders()">待审核</button>
+                        <button class="btn btn-sm btn-outline-info me-2" @click="manageFilterStatus='approved'; fetchAllOrders()">待发货</button>
+                        <button class="btn btn-sm btn-outline-success" @click="manageFilterStatus='shipped'; fetchAllOrders()">已发货</button>
+                    </div>
+                    <div class="card mb-3" v-for="order in allOrders" :key="order.id">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between">
+                                <h5 class="card-title">订单 #{{ order.id }} (用户: {{ order.username }})</h5>
+                                <span class="badge" :class="statusBadgeClass(order.status)">{{ getStatusText(order.status) }}</span>
+                            </div>
+                            <p class="card-text">总额: ¥{{ order.total_price }} | 时间: {{ order.created_at }}</p>
+                            
+                            <div class="mt-2" v-if="order.status === 'pending'">
+                                <button class="btn btn-success btn-sm" @click="auditOrder(order.id, 'approved')">通过审核</button>
+                                <button class="btn btn-danger btn-sm" @click="auditOrder(order.id, 'cancelled')">取消订单</button>
+                            </div>
+                            <div class="mt-2" v-if="order.status === 'approved'">
+                                <button class="btn btn-primary btn-sm" @click="auditOrder(order.id, 'shipped')">发货</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats -->
+                <div v-if="manageTab === 'stats'">
+                    <h4>销售统计</h4>
+                    <div class="row g-4 mb-4">
+                        <div class="col-md-6">
+                            <div class="card text-center h-100 border-primary">
+                                <div class="card-header bg-primary text-white">今日销售</div>
+                                <div class="card-body">
+                                    <h3 class="display-6">¥{{ stats.daily?.total || 0 }}</h3>
+                                    <p class="text-muted">{{ stats.daily?.count || 0 }} 单</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card text-center h-100 border-success">
+                                <div class="card-header bg-success text-white">历史总销售</div>
+                                <div class="card-body">
+                                    <h3 class="display-6">¥{{ stats.total?.total || 0 }}</h3>
+                                    <p class="text-muted">{{ stats.total?.count || 0 }} 单</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <h5>热销书籍 TOP 5</h5>
+                    <ul class="list-group">
+                        <li class="list-group-item d-flex justify-content-between align-items-center" v-for="(book, index) in stats.top_books" :key="index">
+                            {{ index + 1 }}. {{ book.title }}
+                            <span class="badge bg-primary rounded-pill">{{ book.sold_count }} 本</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Cart Offcanvas/Modal -->
+        <div class="modal fade" id="cartModal" tabindex="-1" :class="{show: showCart}" :style="{display: showCart ? 'block' : 'none'}">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">购物车</h5>
+                        <button type="button" class="btn-close" @click="showCart = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div v-if="cartItems.length === 0" class="text-center py-4">购物车是空的</div>
+                        <table v-else class="table align-middle">
+                            <thead>
+                                <tr>
+                                    <th>商品</th>
+                                    <th>单价</th>
+                                    <th>数量</th>
+                                    <th>小计</th>
+                                    <th>操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="item in cartItems" :key="item.book.id">
+                                    <td>{{ item.book.title }}</td>
+                                    <td>¥{{ item.book.price }}</td>
+                                    <td>
+                                        <div class="input-group input-group-sm" style="width: 100px;">
+                                            <button class="btn btn-outline-secondary" @click="updateCartItem(item.book.id, item.quantity - 1)">-</button>
+                                            <input type="text" class="form-control text-center" :value="item.quantity" readonly>
+                                            <button class="btn btn-outline-secondary" @click="updateCartItem(item.book.id, item.quantity + 1)">+</button>
+                                        </div>
+                                    </td>
+                                    <td>¥{{ item.item_total.toFixed(2) }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-danger" @click="updateCartItem(item.book.id, 0)"><i class="fas fa-trash"></i></button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="modal-footer justify-content-between">
+                        <div class="h5 mb-0">总计: ¥{{ cartTotal.toFixed(2) }}</div>
+                        <div>
+                            <button type="button" class="btn btn-secondary" @click="showCart = false">继续购物</button>
+                            <button type="button" class="btn btn-primary" @click="checkout" :disabled="cartItems.length === 0">去结算</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show" v-if="showCart" @click="showCart = false"></div>
+
+        <!-- Login Modal -->
+        <div class="modal fade" :class="{show: showLoginModal}" :style="{display: showLoginModal ? 'block' : 'none'}">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">登录</h5>
+                        <button type="button" class="btn-close" @click="showLoginModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form @submit.prevent="login">
+                            <div class="mb-3">
+                                <label class="form-label">用户名</label>
+                                <input type="text" class="form-control" v-model="loginForm.username" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">密码</label>
+                                <input type="password" class="form-control" v-model="loginForm.password" required>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">登录</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show" v-if="showLoginModal" @click="showLoginModal = false"></div>
+
+        <!-- Register Modal -->
+        <div class="modal fade" :class="{show: showRegisterModal}" :style="{display: showRegisterModal ? 'block' : 'none'}">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">注册</h5>
+                        <button type="button" class="btn-close" @click="showRegisterModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form @submit.prevent="register">
+                            <div class="mb-3">
+                                <label class="form-label">用户名</label>
+                                <input type="text" class="form-control" v-model="registerForm.username" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">密码</label>
+                                <input type="password" class="form-control" v-model="registerForm.password" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">昵称</label>
+                                <input type="text" class="form-control" v-model="registerForm.nickname" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">性别</label>
+                                <select class="form-select" v-model="registerForm.gender">
+                                    <option value="男">男</option>
+                                    <option value="女">女</option>
+                                    <option value="其他">其他</option>
+                                </select>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">注册</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show" v-if="showRegisterModal" @click="showRegisterModal = false"></div>
+
+        <!-- Book Edit/Add Modal -->
+        <div class="modal fade" :class="{show: showBookModal}" :style="{display: showBookModal ? 'block' : 'none'}">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">{{ editingBook.id ? '编辑书籍' : '添加书籍' }}</h5>
+                        <button type="button" class="btn-close" @click="showBookModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form @submit.prevent="saveBook">
+                            <div class="mb-2"><label>标题</label><input class="form-control" v-model="editingBook.title" required></div>
+                            <div class="mb-2"><label>作者</label><input class="form-control" v-model="editingBook.author" required></div>
+                            <div class="mb-2"><label>出版社</label><input class="form-control" v-model="editingBook.publisher"></div>
+                            <div class="mb-2"><label>ISBN</label><input class="form-control" v-model="editingBook.isbn"></div>
+                            <div class="row">
+                                <div class="col"><label>价格</label><input type="number" step="0.01" class="form-control" v-model="editingBook.price" required></div>
+                                <div class="col"><label>库存</label><input type="number" class="form-control" v-model="editingBook.stock" required></div>
+                            </div>
+                            <div class="mb-2">
+                                <label>封面</label>
+                                <input type="file" class="form-control" accept="image/*" @change="onCoverChange">
+                                <img v-if="editingBook.cover" :src="editingBook.cover.startsWith('http') ? editingBook.cover : '/static/covers/' + editingBook.cover" class="mt-2" style="max-width: 100px;">
+                            </div>
+                            <div class="mb-2"><label>简介</label><textarea class="form-control" v-model="editingBook.summary"></textarea></div>
+                            <div class="d-grid mt-3">
+                                <button type="submit" class="btn btn-primary">保存</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade show" v-if="showBookModal" @click="showBookModal = false"></div>
+
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    currentView: 'home',
+                    manageTab: 'books',
+                    user: { role: 'guest', balance: 0 },
+                    books: [],
+                    currentPage: 1,
+                    totalPages: 1,
+                    searchKeyword: '',
+                    
+                    cartItems: [],
+                    cartTotal: 0,
+                    showCart: false,
+                    
+                    orders: [],
+                    allOrders: [],
+                    manageFilterStatus: '',
+                    stats: {},
+                    
+                    showLoginModal: false,
+                    loginForm: { username: '', password: '' },
+                    
+                    showRegisterModal: false,
+                    registerForm: { username: '', password: '', nickname: '', gender: '其他' },
+                    
+                    showUserMenu: false,
+                    
+                    showBookModal: false,
+                    editingBook: {},
+                    coverFile: null,
+                    
+                    message: '',
+                    error: ''
+                }
+            },
+            computed: {
+                cartTotalCount() {
+                    return this.cartItems.reduce((acc, item) => acc + item.quantity, 0);
+                }
+            },
+            mounted() {
+                this.fetchSession();
+                this.fetchBooks();
+                this.fetchCart();
+            },
+            methods: {
+                async fetchSession() {
+                    try {
+                        const res = await axios.get('/api/session');
+                        this.user = res.data;
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                async fetchBooks(page = 1) {
+                    try {
+                        const res = await axios.get(`/api/books?page=${page}&keyword=${this.searchKeyword}`);
+                        this.books = res.data.books;
+                        this.currentPage = res.data.page;
+                        this.totalPages = res.data.pages;
+                        window.scrollTo(0, 0);
+                    } catch (e) {
+                        this.showError('获取书籍失败');
+                    }
+                },
+                searchBooks() {
+                    this.currentPage = 1;
+                    this.fetchBooks();
+                },
+                async fetchCart() {
+                    try {
+                        const res = await axios.get('/api/cart');
+                        this.cartItems = res.data.items;
+                        this.cartTotal = res.data.total;
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                async addToCart(book) {
+                    if (['staff', 'manager'].includes(this.user.role)) {
+                        this.showError('管理员和店员不能购买书籍');
+                        return;
+                    }
+                    try {
+                        await axios.post('/api/cart', { book_id: book.id, quantity: 1 });
+                        this.fetchCart();
+                        this.showMessage('已加入购物车');
+                    } catch (e) {
+                        this.showError('加入购物车失败');
+                    }
+                },
+                async updateCartItem(bookId, quantity) {
+                    try {
+                        await axios.post('/api/cart/update', { book_id: bookId, quantity: quantity });
+                        this.fetchCart();
+                    } catch (e) {
+                        this.showError('更新购物车失败');
+                    }
+                },
+                async checkout() {
+                    if (this.user.role === 'guest') {
+                        this.showCart = false;
+                        this.showLoginModal = true;
+                        this.showError('请先登录再结算');
+                        return;
+                    }
+                    if (['staff', 'manager'].includes(this.user.role)) {
+                        this.showError('管理员和店员不能购买书籍');
+                        return;
+                    }
+                    if (confirm(`确认支付 ¥${this.cartTotal.toFixed(2)}?`)) {
+                        try {
+                            const res = await axios.post('/api/orders');
+                            this.showCart = false;
+                            this.fetchCart();
+                            this.fetchSession(); // Update balance
+                            this.fetchBooks(); // Update book stock
+                            this.showMessage('订单支付成功!');
+                            this.fetchOrders();
+                            this.currentView = 'orders';
+                        } catch (e) {
+                            this.showError(e.response?.data?.error || '支付失败');
+                        }
+                    }
+                },
+                async login() {
+                    try {
+                        const res = await axios.post('/login', this.loginForm);
+                        this.user.role = res.data.role;
+                        this.showLoginModal = false;
+                        this.fetchSession();
+                        this.showMessage('登录成功');
+                    } catch (e) {
+                        this.showError('登录失败: ' + (e.response?.data?.error || 'Unknown error'));
+                    }
+                },
+                logout() {
+                    axios.get('/logout').then(() => {
+                        window.location.reload();
+                    }).catch(e => {
+                        console.error(e);
+                        window.location.reload();
+                    });
+                },
+                async register() {
+                    try {
+                        const res = await axios.post('/register', this.registerForm);
+                        this.showRegisterModal = false;
+                        this.showMessage(`注册成功! 赠送余额: ¥${res.data.balance}`);
+                        // Auto login
+                        this.loginForm.username = this.registerForm.username;
+                        this.loginForm.password = this.registerForm.password;
+                        this.login();
+                    } catch (e) {
+                        this.showError('注册失败: ' + (e.response?.data?.error || ''));
+                    }
+                },
+                async fetchOrders() {
+                    try {
+                        const res = await axios.get('/api/orders');
+                        this.orders = res.data;
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                async fetchAllOrders() {
+                    try {
+                        const res = await axios.get(`/api/orders?status=${this.manageFilterStatus}`);
+                        this.allOrders = res.data;
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                async auditOrder(orderId, status) {
+                    try {
+                        await axios.post(`/api/orders/${orderId}/audit`, { status });
+                        this.fetchAllOrders();
+                        this.fetchSession(); // Update user balance if refunded
+                        this.showMessage('订单状态已更新');
+                    } catch (e) {
+                        this.showError('操作失败');
+                    }
+                },
+                async cancelOrder(orderId) {
+                    if (confirm('确认取消此订单？')) {
+                        console.log('Cancelling order', orderId);
+                        try {
+                            const res = await axios.post(`/api/orders/${orderId}/audit`, { status: 'cancelled' });
+                            console.log('Cancel response', res);
+                            this.fetchOrders();
+                            await this.fetchSession(); // Update balance
+                            console.log('Updated balance:', this.user.balance);
+                            this.fetchBooks(); // Update stock
+                            this.showMessage('订单已取消');
+                        } catch (e) {
+                            console.log('Cancel error', e);
+                            this.showError('取消失败: ' + (e.response?.data?.error || e.message));
+                        }
+                    }
+                },
+                async fetchStats() {
+                    try {
+                        const res = await axios.get('/api/stats');
+                        this.stats = res.data;
+                    } catch (e) {
+                        console.error(e);
+                    }
+                },
+                openBookModal(book = {}) {
+                    this.editingBook = { ...book };
+                    this.coverFile = null;
+                    this.showBookModal = true;
+                },
+                onCoverChange(event) {
+                    const file = event.target.files[0];
+                    if (file) {
+                        if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                            this.showError('文件太大，请选择小于5MB的图片');
+                            return;
+                        }
+                        if (!file.type.startsWith('image/')) {
+                            this.showError('请选择图片文件');
+                            return;
+                        }
+                        this.coverFile = file;
+                        // Preview
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            this.editingBook.cover = e.target.result;
+                        };
+                        reader.readAsDataURL(file);
+                    }
+                },
+                async saveBook() {
+                    try {
+                        const formData = new FormData();
+                        for (const key in this.editingBook) {
+                            if (this.editingBook[key] !== null && this.editingBook[key] !== undefined) {
+                                formData.append(key, this.editingBook[key]);
+                            }
+                        }
+                        if (this.coverFile) {
+                            formData.append('cover', this.coverFile);
+                        }
+                        
+                        if (this.editingBook.id) {
+                            await axios.put(`/api/books/${this.editingBook.id}`, formData, {
+                                headers: { 'Content-Type': 'multipart/form-data' }
+                            });
+                        } else {
+                            await axios.post('/api/books', formData, {
+                                headers: { 'Content-Type': 'multipart/form-data' }
+                            });
+                        }
+                        this.showBookModal = false;
+                        this.coverFile = null;
+                        this.fetchBooks(this.currentPage);
+                        this.showMessage('书籍保存成功');
+                    } catch (e) {
+                        this.showError('保存失败');
+                    }
+                },
+                async toggleShelf(book) {
+                    const newStatus = book.status === 'on_shelf' ? 'off_shelf' : 'on_shelf';
+                    try {
+                        await axios.put(`/api/books/${book.id}`, { ...book, status: newStatus });
+                        book.status = newStatus;
+                    } catch (e) {
+                        this.showError('操作失败');
+                    }
+                },
+                statusBadgeClass(status) {
+                    const map = {
+                        'pending': 'bg-warning',
+                        'approved': 'bg-info',
+                        'shipped': 'bg-primary',
+                        'completed': 'bg-success',
+                        'cancelled': 'bg-secondary'
+                    };
+                    return map[status] || 'bg-secondary';
+                },
+                getStatusText(status) {
+                    const map = {
+                        'pending': '待审核',
+                        'approved': '待发货',
+                        'shipped': '已发货',
+                        'completed': '已完成',
+                        'cancelled': '已取消'
+                    };
+                    return map[status] || status;
+                },
+                showMessage(msg) {
+                    this.message = msg;
+                    setTimeout(() => this.message = '', 3000);
+                },
+                showError(msg) {
+                    this.error = msg;
+                    setTimeout(() => this.error = '', 3000);
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
